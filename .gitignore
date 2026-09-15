@@ -1,0 +1,20 @@
+# Node / pnpm
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+.vite/
+
+# Maven / Java
+target/
+*.class
+.mvn/
+
+# Generated contract clients (regenerated in CI / via scripts)
+**/generated/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.log

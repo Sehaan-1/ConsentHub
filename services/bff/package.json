@@ -1,0 +1,13 @@
+{
+  "name": "@consenthub/bff",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "contract:generate": "orval --input ../../contract/openapi/consenthub-api.yaml --output src/generated"
+  }
+}

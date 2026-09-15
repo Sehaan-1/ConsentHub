@@ -1,0 +1,12 @@
+{
+  "name": "@consenthub/contract",
+  "version": "0.0.0",
+  "private": true,
+  "files": [
+    "openapi"
+  ],
+  "scripts": {
+    "generate": "orval --input openapi/consenthub-api.yaml --output src/generated",
+    "lint": "openapi lint openapi/consenthub-api.yaml"
+  }
+}

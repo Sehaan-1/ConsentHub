@@ -1,0 +1,106 @@
+openapi: 3.1.0
+info:
+  title: ConsentHub API
+  version: 0.0.0
+  description: >
+    Shared OpenAPI contract for ConsentHub. This file is the single source of
+    truth consumed by both the Java backend (openapi-generator) and the Node BFF
+    (orval / openapi-typescript) so contract changes fail every consumer in the
+    same PR.
+servers:
+  - url: https://api.consenthub.example/v1
+paths:
+  /consents:
+    get:
+      summary: List consents for the authenticated principal
+      operationId: listConsents
+      responses:
+        "200":
+          description: A page of consents
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsentPage"
+    post:
+      summary: Record a new consent
+      operationId: createConsent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConsentRequest"
+      responses:
+        "201":
+          description: Consent recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Consent"
+  /consents/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      summary: Fetch a single consent by id
+      operationId: getConsent
+      responses:
+        "200":
+          description: The consent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Consent"
+        "404":
+          description: Consent not found
+components:
+  schemas:
+    Consent:
+      type: object
+      required:
+        - id
+        - subject
+        - purpose
+        - status
+        - grantedAt
+      properties:
+        id:
+          type: string
+        subject:
+          type: string
+        purpose:
+          type: string
+        status:
+          type: string
+          enum:
+            - granted
+            - revoked
+            - expired
+        grantedAt:
+          type: string
+          format: date-time
+    ConsentRequest:
+      type: object
+      required:
+        - subject
+        - purpose
+      properties:
+        subject:
+          type: string
+        purpose:
+          type: string
+    ConsentPage:
+      type: object
+      required:
+        - items
+        - total
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Consent"
+        total:
+          type: integer

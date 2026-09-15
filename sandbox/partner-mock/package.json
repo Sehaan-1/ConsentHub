@@ -1,0 +1,13 @@
+{
+  "name": "@consenthub/partner-mock",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "build": "tsc",
+    "lint": "eslint .",
+    "test": "vitest run"
+  }
+}
