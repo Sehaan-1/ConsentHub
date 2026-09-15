@@ -8,10 +8,180 @@ info:
     (orval / openapi-typescript) so contract changes fail every consumer in the
     same PR.
 servers:
-  - url: https://api.consenthub.example/v1
+  - url: https://api.consenthub.example/api/v1
+    description: >
+      Production gateway. Every path in this document is relative to /api/v1, so
+      the path /auth/login is deployed as POST /api/v1/auth/login. The /api/v1
+      prefix is also what the Spring Security permitOnly rules and the refresh
+      cookie Path assume (ADR-0002).
+tags:
+  - name: auth
+    description: >
+      Authentication and session lifecycle (ADR-0002): short-lived JWT access
+      token returned in the response body, rotating refresh token delivered as an
+      httpOnly + Secure + SameSite=Strict cookie scoped to /api/v1/auth/refresh.
+  - name: consents
+    description: Consent artefacts owned by the authenticated principal.
+security:
+  - bearerAuth: []
 paths:
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Exchange credentials for an access token and a refresh-token cookie
+      operationId: login
+      description: >
+        Authenticates a human caller with a password (BCrypt, cost 12) and starts
+        a token family.
+
+
+        The 5-minute JWT access token is returned in the response body so the SPA
+        can hold it in memory only (ADR-0002 §2). The refresh token is never in
+        the body: it is set as an httpOnly cookie so no script on the origin can
+        read it.
+
+
+        Response cookie (attributes per ADR-0002 §3):
+
+        `Set-Cookie: ch_rt_cus=<opaque>; Path=/api/v1/auth/refresh; HttpOnly;
+        Secure; SameSite=Strict` for audience `customer-web`, and `ch_rt_ops`
+        for `ops-console`.
+
+
+        Failures return a single generic message so the endpoint cannot be used
+        to enumerate users. Rate limit: 5 failed attempts per 15 minutes per
+        username and 20 per 15 minutes per source IP.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: >
+            Authenticated. The access token is in the body; the refresh token is
+            in the Set-Cookie header.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "400":
+          description: Malformed request, or an unknown audience.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Invalid credentials. The message is generic by design.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "423":
+          description: >
+            Account locked after 5 consecutive failures. The lockout lasts 15
+            minutes and is recorded as a SECURITY event.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: Rate limit exceeded for this username or source IP.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /auth/refresh:
+    post:
+      tags: [auth]
+      summary: Rotate the refresh token and issue a new access token
+      operationId: refresh
+      description: >
+        Silent refresh (ADR-0002 §4). Reads only the cookie matching `audience`
+        (`ch_rt_cus` or `ch_rt_ops`), retires it, and issues a replacement.
+        Every refresh token is single-use: rotation happens on every call.
+
+
+        Clients MUST single-flight this call — exactly one in-flight refresh at a
+        time, no blind retry, and cross-tab coordination via BroadcastChannel.
+        Presenting an already-rotated token revokes the entire token family and
+        writes a SECURITY event (REFRESH_TOKEN_REUSE) to the audit ledger. The
+        response is a generic 401 either way, so the endpoint is not an oracle.
+
+
+        No reuse grace window: a replayed token always revokes the family.
+
+
+        Requires `Content-Type: application/json`. Combined with SameSite=Strict
+        and the CORS allowlist this is what closes CSRF on the one
+        cookie-authenticated endpoint.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+      responses:
+        "200":
+          description: >
+            New access token in the body; the rotated refresh token replaces the
+            presented cookie (same attributes, fresh TTL).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "400":
+          description: >
+            Malformed request, missing JSON content type, or an unknown audience.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: >
+            The presented refresh token is missing, expired, or was already
+            rotated. In the reuse case the whole family has been revoked and a
+            SECURITY event raised, but the response body is identical.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: Revoke the caller's token family and clear the refresh cookie
+      operationId: logout
+      description: >
+        Deliberate logout (ADR-0002 §5). Revokes every refresh token in the
+        caller's family, pushes the session id onto the revocation deny-list so
+        in-flight access tokens are refused on their next request instead of
+        living out their remaining TTL, and expires the refresh cookie with
+        `Max-Age=0`.
+
+
+        Authenticated with the access token being discarded, so the caller can
+        always log out even when its refresh token is already dead.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+      responses:
+        "204":
+          description: Family revoked and cookie cleared.
+        "401":
+          description: Missing or invalid access token.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
   /consents:
     get:
+      tags: [consents]
       summary: List consents for the authenticated principal
       operationId: listConsents
       responses:
@@ -22,6 +192,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ConsentPage"
     post:
+      tags: [consents]
       summary: Record a new consent
       operationId: createConsent
       requestBody:
@@ -45,6 +216,7 @@ paths:
         schema:
           type: string
     get:
+      tags: [consents]
       summary: Fetch a single consent by id
       operationId: getConsent
       responses:
@@ -57,7 +229,151 @@ paths:
         "404":
           description: Consent not found
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        RS256-signed JWT access token, TTL 300 s (5 min), sent as
+        `Authorization: Bearer` and held in SPA memory only — never in
+        localStorage, sessionStorage or IndexedDB (ADR-0002 §2, §8).
+
+
+        Applied document-wide so the API is deny-by-default; only
+        /auth/login and /auth/refresh override it with `security: []`.
+
+
+        Claims: iss, aud, sub (user id), sid (token family id), roles[],
+        customerId | fiuId, jti, iat, nbf, exp. `sid` is what the revocation
+        deny-list keys on and what the audit ledger records as session_id.
   schemas:
+    Audience:
+      type: string
+      description: >
+        Which client the session belongs to. Determines the refresh-token TTL
+        (12 h sliding for customer-web, 15 min sliding for ops-console — the
+        agent idle timeout), the absolute family cap (72 h / 8 h) and which
+        cookie the server reads, so one browser can hold both sessions at once.
+      enum:
+        - customer-web
+        - ops-console
+    LoginRequest:
+      type: object
+      required:
+        - identifier
+        - password
+        - audience
+      properties:
+        identifier:
+          type: string
+          description: Username. Not echoed back in any response.
+        password:
+          type: string
+          format: password
+          description: Verified against a BCrypt hash, cost 12.
+        audience:
+          $ref: "#/components/schemas/Audience"
+    RefreshRequest:
+      type: object
+      description: >
+        Body of a refresh or logout call. The refresh token itself is never in
+        the body — it arrives as the httpOnly cookie. Declaring the audience here
+        is also what forces `Content-Type: application/json`, which is one of the
+        three layers closing CSRF on this endpoint.
+      required:
+        - audience
+      properties:
+        audience:
+          $ref: "#/components/schemas/Audience"
+    Principal:
+      type: object
+      description: >
+        Who the caller is. Carries customerId or fiuId so ownership checks have
+        something to check against (issue #27).
+      required:
+        - userId
+        - username
+        - role
+      properties:
+        userId:
+          type: string
+        username:
+          type: string
+        role:
+          type: string
+          enum:
+            - CUSTOMER
+            - AGENT
+            - SUPERVISOR
+            - FIU
+            - ADMIN
+        customerId:
+          type: string
+          description: Present for the CUSTOMER role only.
+        fiuId:
+          type: string
+          description: Present for the FIU role only.
+    LoginResponse:
+      type: object
+      description: >
+        Returned by both /auth/login and /auth/refresh. The access token is in
+        the body so the SPA can keep it in memory; the refresh token is only ever
+        in the Set-Cookie header.
+      required:
+        - tokenType
+        - accessToken
+        - expiresIn
+        - principal
+      properties:
+        tokenType:
+          type: string
+          enum:
+            - Bearer
+        accessToken:
+          type: string
+          description: RS256-signed JWT. TTL 300 s. Never persisted client-side.
+        expiresIn:
+          type: integer
+          description: Access-token lifetime in seconds. Always 300 for human clients.
+          example: 300
+        refreshExpiresIn:
+          type: integer
+          description: >
+            Lifetime in seconds of the refresh token set by this response —
+            43200 for customer-web, 900 for ops-console. The cookie's Max-Age
+            matches it.
+          example: 900
+        principal:
+          $ref: "#/components/schemas/Principal"
+    Problem:
+      type: object
+      description: >
+        RFC 9457 problem detail. Auth failures are deliberately uniform: the
+        caller cannot distinguish "no such user", "wrong password", "expired
+        refresh token" from "replayed refresh token, family revoked".
+      required:
+        - type
+        - title
+        - status
+      properties:
+        type:
+          type: string
+          format: uri
+          example: https://consenthub.example/problems/invalid-grant
+        title:
+          type: string
+          example: Invalid grant
+        status:
+          type: integer
+          example: 401
+        detail:
+          type: string
+          description: Generic and safe to show to an end user.
+        instance:
+          type: string
+          format: uri
+          description: Correlation id for this request (issue #50).
     Consent:
       type: object
       required:
