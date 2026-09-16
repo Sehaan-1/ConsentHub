@@ -1476,7 +1476,8 @@ decisions. The acceptance criteria of issue #3 are discharged by the artifacts i
 
 Cost, stated rather than hidden: this ADR adds **six tables** to issue #13's list (`retention_hold`,
 `retention_policy`, `customer_ledger_seq`, `ledger_counters`, `data_key`, `message_catalog`) and
-reshapes a seventh (`notice_version`). That is roughly 30 extra minutes on #13 and a sizeable chunk
+reshapes two it already named — `notice_version` (§9: append-only, no `effective_to`, hash pinned)
+and `consent_artefact` (§8.1: eight added columns, four new constraints). That is roughly 30 extra minutes on #13 and a sizeable chunk
 of #14's seed. The alternative — deferring them so week 1 ships the original 13 tables — is what
 turns a one-way door into a migration over rows that were written under a different premise, which
 is precisely the thing this ADR exists to prevent. If #13 must be cut, cut `retention_policy` and
