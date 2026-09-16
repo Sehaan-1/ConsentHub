@@ -717,11 +717,13 @@ change what the customer agreed to.** The set is therefore exactly:
 | `version` | Hibernate's optimistic lock; it exists to make in-place writes safe |
 | `redacted_at`, `redaction_dsar_id`, `subject_key_id` | Erasure (§10) — they *reduce* information, and each write is itself a ledger row |
 
-Everything else — `customer_id`, `fiu_id`, `purpose_code`, the category snapshot, `date_from`,
+Everything else — `customer_id`, `fiu_id`, `purpose_id`, `data_categories`, `date_from`,
 `date_to`, `consent_start`, `consent_expiry`, `fetch_type`, `frequency`, `data_life_days`,
 `notice_version_id`, the notice hashes, `signature`, `sig_algorithm`, `signer_key_id` — is
 **not** `UPDATE`-able, at three levels: `@Column(updatable = false)` on the entity, no method that
-could try in the repository, and no privilege in the database.
+could try in the repository, and no privilege in the database. (`purpose_id` is the FK; the
+*code* lives denormalised on `data_access_log.purpose_code` and `notice_version.purpose_code`, so
+an access row and a notice body still read correctly ten years after someone renames a purpose.)
 
 **Changing substance means a new row.** `supersedes_id BINARY(16) NULL` and `migrated_from_id`
 (the latter for #43's bulk migrations) carry lineage; `CONSENT_MIGRATED` is written on **both** rows
@@ -749,6 +751,67 @@ Why this hybrid rather than one of the two pure positions:
 - The hybrid keeps the *evidence* immutable (body, hash, signature, notice, ledger) and the
   *convenience* mutable (status), and then makes the mutable part reconstructible: the artefact row
   is a cache, and §7's per-event hash means an in-place edit of anything else is detectable.
+
+#### 8.1 The artefact's columns, in one place
+
+§5.2 grants write access to this table *by column*, so the column set is normative here — #13
+creates it and #17 maps it. Lines marked **(ADR-0003)** are what this ADR adds to #17's list;
+everything else is #17's existing shape, restated so the grant can be checked against it.
+
+```sql
+CREATE TABLE consent_artefact (
+  id                  BINARY(16)  NOT NULL,
+  customer_id         BINARY(16)  NOT NULL,   -- FK to customer; frozen, and the shred target (§10)
+  fiu_id              BINARY(16)  NOT NULL,   -- who may fetch
+  purpose_id          BINARY(16)  NOT NULL,   -- FK to purpose; the code is denormalised onto reads
+  data_categories     TEXT        NOT NULL,   -- canonical JSON set (no JSON type: ADR-0005)
+  date_from           DATE        NOT NULL,   -- the data window the customer opened
+  date_to             DATE        NOT NULL,
+  fetch_type          VARCHAR(16) NOT NULL,   -- ONE_TIME | PERIODIC
+  frequency           VARCHAR(32) NULL,       -- required when PERIODIC (#17's validation test)
+  data_life_days      INT         NOT NULL,   -- how long the FIU may keep what it fetched
+  consent_start       DATETIME(6) NOT NULL,   -- validity window: agreed, therefore frozen
+  consent_expiry      DATETIME(6) NOT NULL,
+  notice_version_id   BINARY(16)  NOT NULL,   -- (ADR-0003) the pin: what they were shown
+  notice_body_sha256  CHAR(64)    NOT NULL,   -- (ADR-0003) …and proof of which bytes
+  notice_render_sha256 CHAR(64)   NOT NULL,   -- (ADR-0003) the render they were served
+  notice_render_version SMALLINT NOT NULL,    -- (ADR-0003) which renderer, so a tweak ≠ a tamper
+  signature           VARBINARY(512) NULL,    -- #91; part of the hashed, frozen body
+  sig_algorithm       VARCHAR(32) NULL,
+  signer_key_id       VARCHAR(64) NULL,
+  status              VARCHAR(16) NOT NULL,   -- PENDING|ACTIVE|PAUSED|REVOKED|EXPIRED (#31's machine)
+  paused_at           DATETIME(6) NULL,       -- timestamps *of* a transition
+  revoked_at          DATETIME(6) NULL,
+  version             BIGINT      NOT NULL,   -- @Version: the optimistic lock lives here only
+  supersedes_id       BINARY(16)  NULL,       -- (ADR-0003) substance lineage (§8)
+  migrated_from_id    BINARY(16)  NULL,       -- (ADR-0003) #43's bulk migrations
+  redacted_at         DATETIME(6) NULL,       -- (ADR-0003) erasure stamps; they narrow, never widen
+  redaction_dsar_id   BINARY(16)  NULL,       -- (ADR-0003) which DSAR did it
+  subject_key_id      BINARY(16)  NULL,       -- (ADR-0003) which key made consent_event.subject_ref
+  created_at          DATETIME(6) NOT NULL,
+  PRIMARY KEY (id),
+  CONSTRAINT ck_ca_periodic CHECK (fetch_type <> 'PERIODIC' OR frequency IS NOT NULL),
+  CONSTRAINT ck_ca_window   CHECK (date_to IS NULL OR date_to >= date_from),
+  CONSTRAINT ck_ca_expiry   CHECK (consent_expiry > consent_start),
+  CONSTRAINT ck_ca_redaction CHECK ((redacted_at IS NULL) = (redaction_dsar_id IS NULL)),
+  CONSTRAINT fk_ca_notice FOREIGN KEY (notice_version_id) REFERENCES notice_version (id)
+                                                      ON DELETE RESTRICT
+) /*!40101 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci */;
+```
+
+Three things this shape is doing beyond listing fields:
+
+- **`ck_ca_periodic`** is #17's validation rule written twice — once in the domain, once in the
+  schema — so a seed script or a migration cannot create a `PERIODIC` artefact with no frequency the
+  way #43 requires for `maker ≠ checker`.
+- **`ck_ca_redaction`** makes "redacted but by which DSAR?" unrepresentable: a partial redaction
+  would be a row that lost data with no record of who did it, which is precisely the artifact a
+  regulator asks about and cannot answer.
+- **`fk_ca_notice … ON DELETE RESTRICT`** is the load-bearing line for §9: an artefact can never
+  outlive the text it pins, so "we can reconstruct what they saw" is enforced by the schema rather
+  than by remembering to keep notice rows around. It also means a notice version is *undeletable*
+  while any artefact pins it — which is §11.2's eligibility rule falling out of a constraint instead
+  of a job.
 
 A corollary worth writing down because it comes up in review: **`@Version` is on the artefact and is
 deliberately absent from the ledger rows.** An append-only row needs no lock — nothing contends to
@@ -1422,9 +1485,9 @@ columns, or `notice_version`'s immutability.
 
 | Ticket | Must contain, from this ADR | The check that proves it |
 |---|---|---|
-| **#13** `V1__init.sql` | `consent_event` and `data_access_log` as §2, `notice_version` as §9, `retention_hold`/`customer_ledger_seq`/`ledger_counters`/`data_key`/`message_catalog`/`retention_policy` as named here; `artefact_sha256`-related columns; no `updated_at`, no `ON DELETE CASCADE` on history, `utf8mb4`, UTC `DATETIME(6)` | `flyway:migrate` + `validate` on an empty DB; a schema test asserting every column comment of the two ledger tables is non-empty |
+| **#13** `V1__init.sql` | `consent_event` and `data_access_log` as §2, `notice_version` as §9, `consent_artefact` as §8.1; `retention_hold` (§11.1), `customer_ledger_seq` + `ledger_counters` (§12.4), `data_key` (§10), `message_catalog` (§13.3), `retention_policy` (§11.3); no `updated_at` on any table, no `ON DELETE CASCADE` on history, `utf8mb4`, UTC `DATETIME(6)` | `flyway:migrate` + `validate` on an empty DB; a schema test asserting every column comment of the two ledger tables is non-empty |
 | **#14** reference data | `message_catalog` seed (§13.3); **no `effective_to` on `notice_version`** (§9) | idempotent, versioned seed |
-| **#17** artefact + notice entities | pin columns `notice_version_id` + `notice_body_sha256` + `render_sha256` + `render_version`; `effective_to` as a derived read-only field; `@Version` on the artefact only (§8) | `ddl-auto=validate`; the optimistic-lock test #17 already names; a test asserting no `@Version` on any ledger entity |
+| **#17** artefact + notice entities | §8.1 in full — `notice_version_id` + `notice_body_sha256` + `notice_render_sha256` + `notice_render_version`; `effective_to` as a derived read-only field; `@Version` on the artefact only (§8) | `ddl-auto=validate`; the optimistic-lock test #17 already names; a test asserting no `@Version` on any ledger entity |
 | **#18** ledger entities | §6.1 shape — `updatable = false` everywhere, no setters, app-assigned id (`updatable=false`, insertable); `ConsentEventType` == §4's table | metamodel test that every column is non-updatable (incl. inherited); the enum-vs-ADR test; the "anonymous event cannot be built" test |
 | **#21** repositories | `InsertOnlyRepository` (§6.2), no `save`/`delete*` on ledger repos | `RepositoryInformation` assertion over the *effective* (inherited) method set |
 | **#22** Testcontainers | the harness must create `ch_migrate` **and** `ch_app`, migrate as the former and run tests as the latter; `@DirtiesContext` per grant test class | the §5.4 tests are impossible otherwise; this is the ticket that makes the grant testable at all |
