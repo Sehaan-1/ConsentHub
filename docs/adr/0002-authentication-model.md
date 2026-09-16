@@ -65,7 +65,8 @@ Login hardening, so the credential itself is not the weak point:
 
 - Passwords are BCrypt, **cost 12** (issue #20 requires ≥ 10).
 - **5** failed attempts per **900 s (15 min)** per username, and **20** per **900 s** per source
-  IP (Redis counters); lockout lasts **900 s (15 min)** and is recorded as a `SECURITY` event.
+  IP (Redis counters); lockout lasts **900 s (15 min)** and is recorded as a `SECURITY_LOGIN_LOCKOUT`
+  event (ADR-0003 §4 names the ledger's vocabulary).
 - Failures return one generic message. No user enumeration, no "wrong password" vs "no such
   user" distinction (issue #57).
 
@@ -158,11 +159,13 @@ the attack case: someone copied the token before rotation and is replaying it.
 4. The server pushes `sid:<familyId>` into the Redis deny-list with a **300 s** TTL, so access
    tokens already issued for that family stop working on their next request instead of living
    out their remaining five minutes.
-5. The server appends a `SECURITY` event to the audit ledger (ADR-0003):
-   `event_type = REFRESH_TOKEN_REUSE`, `actor_type = USER`, `actor_id = user_id`,
-   `source_ip`, `user_agent`,
-   `metadata = {sessionId: familyId, presentedGeneration, activeGeneration, audience,
-   oldestIssuedAt}`.
+5. The server appends a `SECURITY` event to the audit ledger, with the field names ADR-0003 §2–§4
+   settled on: `event_type = SECURITY_REFRESH_TOKEN_REUSE`, `actor_type =` the role of the session
+   (`CUSTOMER` / `AGENT` / `SUPERVISOR` / `ADMIN` — the ledger has no `USER` member),
+   `actor_id = user_id`, `session_id = familyId`, `source_prefix` (the /24 or /48, not the full
+   address), `client_agent` (the parsed family, not the raw string), and
+   `metadata = {presentedGeneration, activeGeneration, audience, oldestIssuedAt}` — `sessionId` is a
+   column, so it is not duplicated in the blob.
    Presenting an already-`REVOKED` token raises the same event — repeated probing is evidence,
    and an append-only ledger is the right place for duplicates.
 6. The server answers `401` with a `Problem` (`type: .../problems/invalid-grant`) and a generic
@@ -246,10 +249,11 @@ data, so its session is deliberately shorter-lived than a customer's:
   Approving a consent on someone's behalf should require a password typed in the last five
   minutes, not a session started this morning.
 - **Attribution.** Every agent request carries `sid`, and it is recorded on every audit row the
-  request produces. Issue #13's `consent_event` has no session column yet, so until ADR-0003
-  promotes one it rides in `metadata.sessionId`; either way the audit viewer can show *which
-  session* of *which supervisor* read a customer's data — and reading the audit log is itself
-  audited (issue #73).
+  request produces — as `consent_event.session_id`, the first-class column ADR-0003 §3 promoted it
+  to (indexed by `idx_ce_session`, so "everything this session did" is one query). The
+  `metadata.sessionId` workaround this ADR provisionally allowed is therefore never built. The audit
+  viewer can show *which session* of *which supervisor* read a customer's data, and reading the audit
+  log is itself audited (issues #46, #73).
 
 ### 7. Machine clients
 
@@ -423,8 +427,11 @@ silent refresh, logout).
 ## References
 
 - ADR-0001 — the contract is a root-level artifact consumed by both halves.
-- ADR-0003 — where `SECURITY` events are written; it should carry a session identifier, and is
-  the record that reuse detection relies on.
+- ADR-0003 — where `SECURITY` events are written, and the record reuse detection relies on. It
+  landed after this ADR and amended the provisional ledger spellings here: `SECURITY` → the canonical
+  `SECURITY_REFRESH_TOKEN_REUSE` / `SECURITY_LOGIN_LOCKOUT` members, `actor_type = USER` → the
+  session's role, and `metadata.sessionId` → the `session_id` column. The numbers in this document
+  are unchanged; only the ledger's field names were, and ADR-0003 §4's table is the vocabulary.
 - ADR-0004 — logout clears the TanStack Query cache; server state is not kept in a client store.
 - RFC 9700 (OAuth 2.0 Security Best Current Practice) — sender-constrained refresh tokens,
   rotation and reuse detection.
