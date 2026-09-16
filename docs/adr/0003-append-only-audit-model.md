@@ -879,11 +879,17 @@ type-validated `metadata`); the only thing tying rows to a person is
    after — which is why the table needs exactly the two §5.2 columns and nothing more:
 
    ```sql
-   CREATE TABLE data_key (                   -- one row per customer; k_customer lives here
-     id BINARY(16) NOT NULL, customer_id BINARY(16) NOT NULL,
-     wrapped_key VARBINARY(512) NULL,        -- DEK wrapped by the platform KEK; NULL once shredded
-     created_at DATETIME(6) NOT NULL, shredded_at DATETIME(6) NULL,
-     PRIMARY KEY (id), CONSTRAINT uq_dk_customer UNIQUE (customer_id)
+   CREATE TABLE data_key (
+     id           BINARY(16)      NOT NULL,   -- one row per customer; k_customer lives here
+     customer_id  BINARY(16)      NOT NULL,
+     wrapped_key  VARBINARY(512)  NULL,       -- DEK wrapped by the platform KEK; NULL once shredded
+     created_at   DATETIME(6)     NOT NULL,
+     shredded_at  DATETIME(6)     NULL,        -- the erasure stamp: set once, never unset (§10)
+     PRIMARY KEY (id),
+     CONSTRAINT uq_dk_customer UNIQUE (customer_id),
+     -- a key is either live-and-unshredded or gone-and-shredded; the other two combinations are
+     -- exactly the half-done erasure states §10's ordering is designed not to leave behind
+     CONSTRAINT ck_dk_state CHECK ((wrapped_key IS NULL) = (shredded_at IS NOT NULL))
    );
    ```
 
@@ -963,11 +969,18 @@ mutable table the purge consults:
 
 ```sql
 CREATE TABLE retention_hold (
-  id BINARY(16) NOT NULL, artefact_id BINARY(16) NULL, subject_ref BINARY(32) NULL,
-  reason_code VARCHAR(32) NOT NULL, authority_ref VARCHAR(64) NOT NULL,   -- matter / order number
-  placed_by BINARY(16) NOT NULL, placed_at DATETIME(6) NOT NULL,
-  released_by BINARY(16) NULL, released_at DATETIME(6) NULL,
-  PRIMARY KEY (id), CONSTRAINT ck_hold_shape CHECK ((artefact_id IS NULL) <> (subject_ref IS NULL))
+  id            BINARY(16)  NOT NULL,
+  artefact_id   BINARY(16)  NULL,        -- hold one artefact's rows…
+  subject_ref   BINARY(32)  NULL,        -- …or one subject's whole ledger, never both
+  reason_code   VARCHAR(32) NOT NULL,    -- LITIGATION, REGULATORY_ORDER, INVESTIGATION
+  authority_ref VARCHAR(64) NOT NULL,    -- matter or order number, so the hold is traceable
+  placed_by     BINARY(16)  NOT NULL,
+  placed_at     DATETIME(6) NOT NULL,
+  released_by   BINARY(16)  NULL,        -- the only UPDATE the app may make here (§5.2)
+  released_at   DATETIME(6) NULL,
+  PRIMARY KEY (id),
+  CONSTRAINT ck_hold_shape CHECK ((artefact_id IS NULL) <> (subject_ref IS NULL)),
+  CONSTRAINT ck_hold_release CHECK ((released_by IS NULL) = (released_at IS NULL))
 );
 ```
 
