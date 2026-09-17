@@ -9,8 +9,8 @@
 
 Three kinds of caller have to be authenticated by the same backend:
 
-- The **customer portal** SPA (`apps/web`) — role `CUSTOMER`. Owners of the financial data.
-- The **ops console** SPA (`apps/portal`) — roles `AGENT`, `SUPERVISOR`, `ADMIN`. People who
+- The **customer portal** SPA (`apps/customer-portal`) — role `CUSTOMER`. Owners of the financial data.
+- The **ops console** SPA (`apps/ops-console`) — roles `AGENT`, `SUPERVISOR`, `ADMIN`. People who
   approve consents, run DSARs and read the audit ledger on other people's behalf.
 - The **FIU service account** — a machine client that raises consent requests and fetches
   artefacts. No human, no browser.

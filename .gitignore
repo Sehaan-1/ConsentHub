@@ -1,20 +1,30 @@
-# Node / pnpm
+# Dependencies
 node_modules/
+pnpm-debug.log*
+
+# Build output
 dist/
 build/
-*.tsbuildinfo
+coverage/
 .vite/
+*.tsbuildinfo
 
 # Maven / Java
 target/
 *.class
 .mvn/
 
-# Generated contract clients (regenerated in CI / via scripts)
+# Generated contract clients
 **/generated/
 
-# Editor / OS
+# Environment and local tooling
+.env
+.env.*
+!.env.example
 .DS_Store
 .idea/
 .vscode/
 *.log
+
+# Test / OS files
+*.local

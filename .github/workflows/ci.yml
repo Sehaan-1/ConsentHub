@@ -1,8 +1,5 @@
 name: CI
 
-# One pipeline at the repo root that fans out across the JS workspaces and the
-# Maven multi-module backend. Contract-first: the contract is generated for both
-# halves in the same job graph, so an incompatible spec change fails the PR.
 on:
   push:
     branches: [main]
@@ -19,6 +16,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -34,24 +33,42 @@ jobs:
       fail-fast: false
       matrix:
         package:
-          - apps/web
-          - apps/portal
-          - services/bff
-          - sandbox/partner-mock
+          - apps/customer-portal
+          - apps/ops-console
+          - apps/bff
+          - apps/partner-sandbox
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # BFF regenerates typed clients from the contract before building.
-      - if: ${{ matrix.package == 'services/bff' }}
-        run: pnpm --filter @consenthub/bff contract:generate
+      # Frontends consume the built declaration and CSS entry points from the shared UI package.
+      - run: pnpm --filter @consenthub/ui build
       - run: pnpm --filter "./${{ matrix.package }}" lint
       - run: pnpm --filter "./${{ matrix.package }}" build
       - run: pnpm --filter "./${{ matrix.package }}" test
+
+  shared-ui:
+    name: Shared UI
+    needs: contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @consenthub/ui build
+      - run: pnpm --filter @consenthub/ui test
 
   backend:
     name: Backend (Maven)
@@ -64,6 +81,4 @@ jobs:
           distribution: temurin
           java-version: 21
           cache: maven
-      # openapi-generator regenerates server stubs from the same contract file;
-      # a breaking spec change fails `verify` here, in the same PR.
-      - run: mvn -q -f backend verify
+      - run: mvn -q -f backend/pom.xml verify

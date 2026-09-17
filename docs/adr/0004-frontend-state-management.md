@@ -7,8 +7,8 @@
 
 ## Context
 
-Two React SPAs sit on top of the same API: the customer portal (`apps/web`, role `CUSTOMER`) and the
-ops console (`apps/portal`, roles `AGENT` / `SUPERVISOR` / `ADMIN`), built in weeks 3–4 (#56–#73).
+Two React SPAs sit on top of the same API: the customer portal (`apps/customer-portal`, role `CUSTOMER`) and the
+ops console (`apps/ops-console`, roles `AGENT` / `SUPERVISOR` / `ADMIN`), built in weeks 3–4 (#56–#73).
 Both consume generated types from `contract/openapi/consenthub-api.yaml` (ADR-0001), both hold their
 access token in memory and refresh it from an `httpOnly` cookie (ADR-0002), and both render data
 whose authority is the append-only ledger (ADR-0003).
@@ -233,7 +233,7 @@ contract), so a contract change that renames or reshapes a parameter fails `tsc`
 keys are built:
 
 ```ts
-// apps/web/src/api/keys.ts — the only file in the app that contains a query-key literal.
+// apps/customer-portal/src/api/keys.ts — the only file in the app that contains a query-key literal.
 export type ConsentFilters = NonNullable<operations['listConsents']['parameters']['query']>;
 export type AccessWindow  = { from: string; to: string; category?: string };
 
@@ -338,7 +338,7 @@ contain the changed fact has been invalidated. The sets are written once, in
 `src/api/invalidation.ts`, so "what does revoke invalidate?" is a review of one file:
 
 ```ts
-// apps/web/src/api/invalidation.ts — read by the mutation hooks and by the tests in §4.4.
+// apps/customer-portal/src/api/invalidation.ts — read by the mutation hooks and by the tests in §4.4.
 export const invalidatedBy = {
   createRequest:  () => [requestKeys.all, dashboardKeys.all],
   approveRequest: () => [requestKeys.all, consentKeys.all, dashboardKeys.all],
@@ -458,7 +458,7 @@ not be true.
 #### 5.2 The hook
 
 ```ts
-// apps/web/src/features/consents/useRevokeConsent.ts
+// apps/customer-portal/src/features/consents/useRevokeConsent.ts
 type Snapshot = Array<[QueryKey, Consent | undefined]>;
 
 export function useRevokeConsent(consentId: string) {
@@ -660,7 +660,7 @@ So the client is `fetch` + `ReadableStream` with an explicit reader, and the rec
 #### 6.4 The handler, coalescing, and the reconnect resync
 
 ```ts
-// apps/web/src/api/stream.ts — module scope, like the token (ADR-0002 §2).
+// apps/customer-portal/src/api/stream.ts — module scope, like the token (ADR-0002 §2).
 const HINT_TARGETS: Record<StreamHint['type'], readonly QueryKey[]> = {
   CONSENT_APPROVED: [consentKeys.all, requestKeys.all, dashboardKeys.all],
   CONSENT_DENIED:   [consentKeys.all, requestKeys.all, dashboardKeys.all],
@@ -737,7 +737,7 @@ nowhere else.
 #### 7.2 The approval draft, keyed by its subject
 
 ```ts
-// apps/web/src/state/approvalDraft.ts
+// apps/customer-portal/src/state/approvalDraft.ts
 type ApprovalDraft = {
   requestId: string | null;              // the server id this draft belongs to
   step: 1 | 2 | 3;
