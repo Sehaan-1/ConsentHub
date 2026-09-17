@@ -1,0 +1,14 @@
+# Dev profile: local development outside docker compose. In-memory H2 in
+# MySQL mode (same as the default profile) — seeded by the very same Flyway
+# migrations as the docker stack, so dev and docker behave identically.
+#
+# Deliberately never points at the MySQL container: dev seeding stays in this
+# profile, keeping the compose MySQL instance reserved for Flyway (see issue
+# #7 note: never run Flyway and a local/test database against the same DB).
+spring:
+  datasource:
+    url: jdbc:h2:mem:consenthub;MODE=MySQL;DATABASE_TO_LOWER=TRUE;CASE_INSENSITIVE_IDENTIFIERS=TRUE;DB_CLOSE_DELAY=-1
+    username: sa
+    password: ""
+  flyway:
+    enabled: true

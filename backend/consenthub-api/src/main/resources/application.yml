@@ -1,5 +1,43 @@
 spring:
   application:
     name: consenthub-api
+
+  # Default and `dev` profiles run against an in-memory H2 database in MySQL
+  # compatibility mode, so the API starts with zero external services
+  # (e.g. plain `mvn spring-boot:run`). The `docker` profile
+  # (application-docker.yml) points at the MySQL 8 and Redis 7 containers.
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:h2:mem:consenthub;MODE=MySQL;DATABASE_TO_LOWER=TRUE;CASE_INSENSITIVE_IDENTIFIERS=TRUE;DB_CLOSE_DELAY=-1}
+    username: ${SPRING_DATASOURCE_USERNAME:sa}
+    password: ${SPRING_DATASOURCE_PASSWORD:}
+
+  flyway:
+    # Migrations (db/migration/V1 schema + V2 demo seed) apply on first boot
+    # in every profile that has a datasource.
+    enabled: ${SPRING_FLYWAY_ENABLED:true}
+    locations: classpath:db/migration
+
+  data:
+    redis:
+      url: ${SPRING_DATA_REDIS_URL:redis://localhost:6379}
+
 server:
-  port: 8080
+  port: ${SERVER_PORT:8080}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include:
+          - health
+          - info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  # The redis health check is off by default because local dev (H2 profile)
+  # usually has no local Redis; the `docker` profile turns it back on so
+  # /actuator/health genuinely depends on the redis container.
+  health:
+    redis:
+      enabled: false

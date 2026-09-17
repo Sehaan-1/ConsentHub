@@ -5,8 +5,13 @@ interface HelloResponse {
   readonly service: string;
 }
 
-const port = Number.parseInt(process.env.PORT ?? '3001', 10);
-const backendOrigin = process.env.BACKEND_URL ?? 'http://backend:8080';
+interface HealthResponse {
+  readonly status: string;
+  readonly service: string;
+}
+
+const port = Number.parseInt(process.env.PORT ?? '4000', 10);
+const backendOrigin = process.env.BACKEND_URL ?? 'http://localhost:8080';
 
 function sendJson<T>(response: ServerResponse, statusCode: number, body: T): void {
   response.writeHead(statusCode, {
@@ -35,6 +40,11 @@ async function proxyHello(response: ServerResponse): Promise<void> {
 
 async function handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
   const requestUrl = new URL(request.url ?? '/', 'http://bff.internal');
+
+  if (request.method === 'GET' && requestUrl.pathname === '/health') {
+    sendJson(response, 200, { status: 'ok', service: 'bff' } satisfies HealthResponse);
+    return;
+  }
 
   if (request.method === 'GET' && requestUrl.pathname === '/api/hello') {
     await proxyHello(response);

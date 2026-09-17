@@ -1,10 +1,88 @@
+# ConsentHub — Week 0 local stack (development profile).
+#
+# One-command boot: ./scripts/boot.sh  (copies .env.example -> .env, then
+# `docker compose up --build`). Dependency order is enforced with
+# healthchecks, so a single `up` always yields a working system:
+#
+#   mysql, redis (stateful, healthy first)
+#     -> backend (Flyway migrations + 'Started ConsentHubApplication')
+#       -> bff (proxies /api to the backend)
+#         -> customer-portal, ops-console (Vite dev servers, HMR)
+#   partner-sandbox (independent mock partner, no dependencies)
+#
+# Credentials live in .env (gitignored, template in .env.example) and are
+# interpolated into this file from there — no secret is committed here.
+
+name: consenthub
+
 services:
+  mysql:
+    image: mysql:8
+    # No `user:` on purpose: the official MySQL 8 image does not support
+    # running as a non-root user (initialisation needs root to chown the
+    # data directory; mysqld then drops to the `mysql` user itself).
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD must be set (see .env.example)}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-consenthub}
+      MYSQL_USER: ${MYSQL_USER:?MYSQL_USER must be set (see .env.example)}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set (see .env.example)}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      # Ping over TCP, not the socket: during first-boot initialisation the
+      # entrypoint's temporary server runs with --skip-networking, so this
+      # only reports healthy once real clients can connect.
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+    # Port 3306 is intentionally not published: other services reach MySQL
+    # over the compose network. Inspect it with
+    #   docker compose exec mysql mysql -uconsenthub -p"$MYSQL_PASSWORD" consenthub
+
+  redis:
+    image: redis:7
+    # The official image creates a `redis` user (uid/gid 999) that owns the
+    # /data workdir; a fresh named volume inherits that ownership from the
+    # image, so the container can run fully non-root with persistence.
+    user: "999:999"
+    command: sh -c 'exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"'
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set (see .env.example)}
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
+    # Port 6379 is intentionally not published (see note on mysql).
+
   backend:
     build:
       context: .
       dockerfile: docker/backend.Dockerfile
     environment:
       SPRING_PROFILES_ACTIVE: docker
+      SPRING_FLYWAY_ENABLED: "true"
+      # Credentials are resolved from the container environment at startup
+      # (application-docker.yml); they are passed in from .env here.
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-consenthub}
+      MYSQL_USER: ${MYSQL_USER:?MYSQL_USER must be set (see .env.example)}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set (see .env.example)}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set (see .env.example)}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     ports:
       - "8080:8080"
 
@@ -17,23 +95,54 @@ services:
     command: ["pnpm", "--filter", "@consenthub/bff", "dev"]
     environment:
       BACKEND_URL: http://backend:8080
-      PORT: "3001"
+      PORT: "4000"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     ports:
-      - "3001:3001"
+      - "4000:4000"
+    healthcheck:
+      # The alpine image has no curl/wget; node is always present.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
+  partner-sandbox:
+    # Mock FIU + FIP + notification receiver for partner integration work.
+    build:
+      context: .
+      dockerfile: docker/node.Dockerfile
+      args:
+        PACKAGE: "@consenthub/partner-sandbox"
+    command: ["pnpm", "--filter", "@consenthub/partner-sandbox", "dev"]
+    environment:
+      PORT: "4100"
+    ports:
+      - "4100:4100"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4100/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
 
   customer-portal:
+    # Vite dev server (HMR). Bound to 0.0.0.0 with allowedHosts: true in
+    # apps/customer-portal/vite.config.ts so proxied preview hosts are
+    # accepted. Talks to the BFF through the same-origin /api proxy.
     build:
       context: .
       dockerfile: docker/node.Dockerfile
       args:
         PACKAGE: "@consenthub/customer-portal"
-    command: ["pnpm", "--filter", "@consenthub/customer-portal", "dev", "--host", "0.0.0.0"]
+    command: ["pnpm", "--filter", "@consenthub/customer-portal", "dev"]
     environment:
-      BFF_URL: http://bff:3001
+      BFF_URL: http://bff:4000
     depends_on:
-      - bff
+      bff:
+        condition: service_healthy
     ports:
       - "5173:5173"
 
@@ -43,10 +152,15 @@ services:
       dockerfile: docker/node.Dockerfile
       args:
         PACKAGE: "@consenthub/ops-console"
-    command: ["pnpm", "--filter", "@consenthub/ops-console", "dev", "--host", "0.0.0.0"]
+    command: ["pnpm", "--filter", "@consenthub/ops-console", "dev"]
     environment:
-      BFF_URL: http://bff:3001
+      BFF_URL: http://bff:4000
     depends_on:
-      - bff
+      bff:
+        condition: service_healthy
     ports:
       - "5174:5174"
+
+volumes:
+  mysql-data:
+  redis-data:

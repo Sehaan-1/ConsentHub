@@ -1,0 +1,26 @@
+# Build contexts are the repository root for every Dockerfile in docker/;
+# keep the context small and make sure no local secrets or caches are ever
+# baked into an image.
+.git
+.github
+.husky
+node_modules
+**/node_modules
+dist
+**/dist
+target
+**/target
+coverage
+**/coverage
+.vite
+**/.vite
+*.tsbuildinfo
+*.log
+pnpm-debug.log*
+.env
+.env.*
+docs
+Makefile
+README.md
+commitlint.config.cjs
+.editorconfig

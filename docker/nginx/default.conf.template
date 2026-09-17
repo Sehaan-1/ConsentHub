@@ -1,0 +1,26 @@
+# ConsentHub frontend (production image).
+#
+# Serves the built SPA with an index.html fallback for client-side routing,
+# and proxies /api/* to the BFF so the browser only ever talks to its own
+# origin (no localhost/backend host in browser code, works behind any
+# proxied preview host). ${BFF_UPSTREAM} is substituted by the nginx image's
+# envsubst template hook; nginx variables ($host, $uri, ...) are left as-is.
+server {
+    listen 80;
+    server_name _;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    location /api/ {
+        proxy_pass ${BFF_UPSTREAM};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
