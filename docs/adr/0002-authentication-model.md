@@ -203,8 +203,8 @@ correct client is cheaper to reason about.
 2. Push `sid:<familyId>` to the Redis deny-list, TTL 300 s.
 3. Expire the caller's audience cookie — `ch_rt_cus` or `ch_rt_ops`, never both:
    `Set-Cookie: <audience cookie>=; Max-Age=0; Path=/api/v1/auth/refresh; HttpOnly; Secure; SameSite=Strict`.
-4. The SPA clears the in-memory access token, clears the TanStack Query cache (ADR-0004) and
-   redirects to `/login`, preserving the intended destination.
+4. The SPA clears the in-memory access token, clears the TanStack Query cache, resets every Zustand
+   store (ADR-0004 §7.5), and redirects to `/login`, preserving the intended destination.
 
 **Tab closed / browser killed.** Nothing calls logout. The access token dies within 300 s; the
 refresh cookie survives until its TTL — which is what "stay signed in" means. There is no
@@ -432,7 +432,9 @@ silent refresh, logout).
   `SECURITY_REFRESH_TOKEN_REUSE` / `SECURITY_LOGIN_LOCKOUT` members, `actor_type = USER` → the
   session's role, and `metadata.sessionId` → the `session_id` column. The numbers in this document
   are unchanged; only the ledger's field names were, and ADR-0003 §4's table is the vocabulary.
-- ADR-0004 — logout clears the TanStack Query cache; server state is not kept in a client store.
+- ADR-0004 — the frontend state split: server state in TanStack Query, UI state in Zustand, shareable
+  state in the URL, and nothing personal persisted. Its §7.5 makes this ADR's logout step normative
+  (`queryClient.clear()` plus a reset of every store).
 - RFC 9700 (OAuth 2.0 Security Best Current Practice) — sender-constrained refresh tokens,
   rotation and reuse detection.
 - OWASP Session Management Cheat Sheet; OWASP HTML5 Security Cheat Sheet (web storage).

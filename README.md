@@ -29,3 +29,4 @@ pnpm build
 | [ADR-0001](docs/adr/0001-monorepo-vs-polyrepo.md) | Monorepo vs Polyrepo for ConsentHub | Accepted | 2026-09-15 |
 | [ADR-0002](docs/adr/0002-authentication-model.md) | Authentication and session model | Accepted | 2026-09-15 |
 | [ADR-0003](docs/adr/0003-append-only-audit-model.md) | Append-only audit ledger | Accepted | 2026-09-15 |
+| [ADR-0004](docs/adr/0004-frontend-state-management.md) | Frontend state management split | Accepted | 2026-09-17 |
