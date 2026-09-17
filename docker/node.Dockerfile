@@ -1,7 +1,7 @@
 FROM node:20-bookworm-slim
 WORKDIR /workspace
 RUN corepack enable
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* ./
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* tsconfig.base.json ./
 COPY apps apps
 COPY packages packages
 COPY contract contract
