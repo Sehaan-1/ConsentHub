@@ -81,4 +81,5 @@ jobs:
           distribution: temurin
           java-version: 21
           cache: maven
+      - run: mvn -q -pl backend/consenthub-domain -am verify
       - run: mvn -q -f backend/pom.xml verify
