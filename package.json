@@ -7,9 +7,19 @@
     "node": ">=20"
   },
   "scripts": {
+    "prepare": "husky",
+    "dev": "pnpm --parallel --filter './apps/*' dev",
     "build": "pnpm -r build",
-    "test": "pnpm -r test",
-    "lint": "pnpm -r lint",
-    "contract:generate": "pnpm --filter @consenthub/contract generate"
+    "test": "pnpm -r --if-present test",
+    "lint": "pnpm -r --if-present lint",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "contract:generate": "pnpm --filter @consenthub/contract generate",
+    "backend:verify": "mvn -q -f backend/pom.xml verify",
+    "backend:domain:verify": "mvn -q -pl backend/consenthub-domain -am verify"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "19.8.1",
+    "@commitlint/config-conventional": "19.8.1",
+    "husky": "9.1.7"
   }
 }

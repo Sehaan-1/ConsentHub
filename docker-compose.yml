@@ -1,0 +1,52 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+    ports:
+      - "8080:8080"
+
+  bff:
+    build:
+      context: .
+      dockerfile: docker/node.Dockerfile
+      args:
+        PACKAGE: "@consenthub/bff"
+    command: ["pnpm", "--filter", "@consenthub/bff", "dev"]
+    environment:
+      BACKEND_URL: http://backend:8080
+      PORT: "3001"
+    depends_on:
+      - backend
+    ports:
+      - "3001:3001"
+
+  customer-portal:
+    build:
+      context: .
+      dockerfile: docker/node.Dockerfile
+      args:
+        PACKAGE: "@consenthub/customer-portal"
+    command: ["pnpm", "--filter", "@consenthub/customer-portal", "dev", "--host", "0.0.0.0"]
+    environment:
+      BFF_URL: http://bff:3001
+    depends_on:
+      - bff
+    ports:
+      - "5173:5173"
+
+  ops-console:
+    build:
+      context: .
+      dockerfile: docker/node.Dockerfile
+      args:
+        PACKAGE: "@consenthub/ops-console"
+    command: ["pnpm", "--filter", "@consenthub/ops-console", "dev", "--host", "0.0.0.0"]
+    environment:
+      BFF_URL: http://bff:3001
+    depends_on:
+      - bff
+    ports:
+      - "5174:5174"

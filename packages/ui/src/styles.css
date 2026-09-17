@@ -1,0 +1,26 @@
+.ch-card {
+  border: 1px solid #d7dce5;
+  border-radius: 0.75rem;
+  background: #ffffff;
+  box-shadow: 0 0.5rem 1.5rem rgb(15 23 42 / 0.08);
+  padding: 1.5rem;
+}
+
+.ch-button {
+  border: 0;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  padding: 0.7rem 1rem;
+}
+
+.ch-button--primary {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.ch-button--secondary {
+  background: #e8eefc;
+  color: #1e3a8a;
+}

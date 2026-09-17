@@ -100,6 +100,6 @@ system.
 
 ## References
 
-- Repo layout implemented by this decision: `pnpm-workspace.yaml`, `apps/*`, `services/bff`,
-  `sandbox/partner-mock`, `contract/openapi`, `backend/` (Maven multi-module).
+- Repo layout implemented by this decision: `pnpm-workspace.yaml`, `packages/ui`, `apps/*`,
+  `contract/openapi`, `backend/` (Maven multi-module).
 - Companion CI: `.github/workflows/ci.yml`.
