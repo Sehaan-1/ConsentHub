@@ -203,8 +203,8 @@ correct client is cheaper to reason about.
 2. Push `sid:<familyId>` to the Redis deny-list, TTL 300 s.
 3. Expire the caller's audience cookie — `ch_rt_cus` or `ch_rt_ops`, never both:
    `Set-Cookie: <audience cookie>=; Max-Age=0; Path=/api/v1/auth/refresh; HttpOnly; Secure; SameSite=Strict`.
-4. The SPA clears the in-memory access token, clears the TanStack Query cache and resets every
-   Zustand store (ADR-0004 §7.6) and redirects to `/login`, preserving the intended destination.
+4. The SPA clears the in-memory access token, clears the TanStack Query cache, resets every Zustand
+   store (ADR-0004 §7.6), and redirects to `/login`, preserving the intended destination.
 
 **Tab closed / browser killed.** Nothing calls logout. The access token dies within 300 s; the
 refresh cookie survives until its TTL — which is what "stay signed in" means. There is no

@@ -118,11 +118,11 @@ A new piece of state is classified by asking, in order:
    `useState`.
 
 And a fourth category that is *not* a store: **imperative, non-rendered resources** — the access
-token, the single-flight refresh promise, the `QueryClient`, the `EventSource`/stream client, the
-generated API client — live in **module scope**, exactly as ADR-0002 §2 puts the access token in "a
+token, the single-flight refresh promise, the `QueryClient`, the stream client (§6.3), the generated
+API client — live in **module scope**, exactly as ADR-0002 §2 puts the access token in "a
 variable in a closure". They are not state to render; they are objects with a lifetime. The only
 thing that crosses from module scope into a store is a *status* someone renders (the stream badge in
-§6.6).
+§6.5).
 
 Why the boundary is not negotiable in either direction:
 
@@ -139,7 +139,7 @@ value has two homes, "which one is true?" becomes a question only the code can a
 ### 2. The state census — where each named piece of state lives
 
 The acceptance criterion for this ADR is "someone new can read it and know which store a given piece
-of state belongs in". This is that table; §10 is how to use it on a value that is not listed.
+of state belongs in". This is that table; §9 is how to use it on a value that is not listed.
 
 #### 2.1 Server state → TanStack Query
 
@@ -181,7 +181,7 @@ of state belongs in". This is that table; §10 is how to use it on a value that 
 | Filter panel open/closed + uncommitted draft values | `usePanelStore` | Session; the *applied* filter is in the URL, the draft is not |
 | Row multi-select for bulk actions | `useSelectionStore` | Session; cleared on route change and after the bulk call (#72) |
 | Toasts / notifications | `useToastStore` | Transient. In a store because non-React code raises them (the query error handler, the stream client). |
-| Stream status badge (`live`/`polling`/`offline`) | `useStreamStatusStore` | §6.6. The connection object is module scope; only the rendered status is a store. |
+| Stream status badge (`live`/`polling`/`offline`) | `useStreamStatusStore` | §6.5. The connection object is module scope; only the rendered status is a store. |
 | Idle-timeout warning dismissed; "stay signed in" in flight | `useSessionUiStore` | ADR-0002 §6; per tab |
 | UI preferences: theme, density, reduced motion, table page size | `usePrefsStore` | Persisted allowlist (§7.6) |
 
@@ -332,7 +332,7 @@ contain the changed fact has been invalidated. The invalidation sets are written
 `src/api/invalidation.ts`, so a review of "what does revoke invalidate?" is a review of one file:
 
 ```ts
-// apps/web/src/api/invalidation.ts — read by the mutation hooks and by the tests in §9.
+// apps/web/src/api/invalidation.ts — read by the mutation hooks and by the tests in §8.
 export const invalidatedBy = {
   createRequest:  () => [requestKeys.all, dashboardKeys.all],
   approveRequest: () => [requestKeys.all, consentKeys.all, dashboardKeys.all],
@@ -369,11 +369,13 @@ contract, and any mutation that touches consent state invariant-wise invalidates
 #### 4.2 Why both lists, and why the dashboard is on every set
 
 - **Both lists, always.** A pending request and the consent it becomes are two projections of one
-  state machine. If approve invalidated only the request list, the dashboard would keep showing
-  "no active consents" for a customer who just granted one — for up to 30 s — and if revoke
-  invalidated only the consent list, the request list could keep offering a decision on an artefact
-  that no longer exists. Invalidation is two `GET`s against a bounded list that is almost always
-  already mounted; the class of bugs it removes is the class this product cannot afford.
+  state machine — #35's denial "appears in the customer's history and the audit log", so the
+  consent-side read models change on a deny too. If approve invalidated only the request list, the
+  dashboard would keep showing "no active consents" for a customer who just granted one — for up to
+  30 s — and if revoke invalidated only the consent list, the request list could keep offering a
+  decision on an artefact that no longer exists. Invalidation is two `GET`s against a bounded list
+  that is almost always already mounted; the class of bugs it removes is the class this product
+  cannot afford.
 - **The dashboard aggregate is a third projection (#77).** The BFF's aggregate endpoint is a read
   model containing consents, requests and counts; a mutation that invalidates the lists but not the
   aggregate leaves the *screenshot in the README* stale. Rule: **a new read model is added to this
@@ -553,7 +555,8 @@ On the pending-review screen (#60), the primary action's pending state is the me
 becomes disabled with a spinner, the card stays visible, and only the server's `200` triggers
 navigation and the §4.1 invalidation. On failure the error is rendered where the button was, with
 the request still open — not a toast that disappears while the customer wonders whether they just
-approved something.
+approved something. #60's "rollback on failure" is this: the pending indicator clears and the card
+returns to its undecided state, because nothing was written optimistically in the first place.
 
 #### 5.6 The residual: a sub-second window
 
@@ -805,14 +808,14 @@ every store write — the one Zustand footgun that shows up as a jank bug rather
   rebuild.
 - **Components in `packages/ui` are state-agnostic.** They take value/onChange/children props and
   import neither `@tanstack/react-query` nor `zustand` (#59). The shared library is the one place
-  where "which store?" must never be a question — and where a boundary lint (§9) keeps it that way.
+  where "which store?" must never be a question — and where a boundary lint (§8) keeps it that way.
   (`pnpm-workspace.yaml` does not yet include `packages/*`; #54 adds it when `packages/ui` lands.)
 
 #### 7.5 What a store may never hold
 
 - **Server entities.** No `Consent`, `ConsentRequest`, `DataAccessLog` or generated API type in any
   store's state — only ids, codes, booleans, numbers and the user's own input. Enforced by the
-  boundary test in §9, not by review alone.
+  boundary test in §8, not by review alone.
 - **Credentials and authorisation claims.** `roles`, `customerId`, the access token: module scope
   (ADR-0002 §2). A role list in a store is a stale-authority bug and an XSS target.
 - **Anything about a person other than the current user's own input.** An agent's "recent customers"
@@ -926,7 +929,7 @@ is a negative control:
 - **Two libraries, two mental models, one rule to keep.** Accepted: the alternative is one library
   and two mental models, where the cache and the store both claim to own a value.
 - **`gcTime` and `staleTime` are retention and freshness decisions living in a config object.** They
-  are one 12-line function (§3.1) so a change is reviewable, and the review question is "what does
+  are a single function (§3.1) so a change is reviewable, and the review question is "what does
   this mean for a customer looking at their data?", not "is it fast".
 - **The invalidation table must be maintained by hand.** It is 10 lines and it is the single most
   valuable 10 lines in the frontend, but it is not generated from anything.
@@ -1076,7 +1079,10 @@ Two recorded disagreements, not silently resolved:
   have five states** (`PENDING | ACTIVE | PAUSED | REVOKED | EXPIRED`). ADR-0003 already put this on
   record as #26's fix. The frontend consequence: the status→pill map (#59) is a total
   `Record<Consent['status'], Pill>` with a `never`-checked default branch, so the day #26 widens the
-  enum the build fails at the map instead of the screen rendering an unstyled pill.
+  enum the build fails at the map instead of the screen rendering an unstyled pill. #31's own note
+  asks for the type half of the same fix — a TS discriminated union on consent state, so an illegal
+  combination does not compile on the client either; that rides on #26's enum, and the map is where
+  the two meet.
 - **The contract has no pagination parameters**, only `ConsentPage.total`. §4.3's `keepPreviousData`
   and #61/#73's "pagination or virtualisation" criteria both assume `page`/`size`; #26 owns them.
 
@@ -1088,7 +1094,7 @@ not decisions. §4.1's table, §3.2's key factory and §7.1's inventory are the 
 | Ticket | Must contain, from this ADR | The check that proves it |
 |---|---|---|
 | **#57** login / silent refresh / logout | `queryClient.clear()` + `resetClientState()` + logout broadcast on the logout path (§7.6); the principal and token in module scope (§1, §7.5) | Test: after logout the cache is empty, every store is reset, and no principal data remains observable |
-| **#58** typed client + Query/Zustand wiring | `createQueryClient()` with §3.3's numbers; `keys.ts` as §3.2; `invalidation.ts` as §4.1; the §7.1 stores; the §8 boundary test | Its own acceptance criteria — generated client in CI, MSW request count after revoke, the draft does not survive a route change, no server data in Zustand — plus the boundary test as a third check |
+| **#58** typed client + Query/Zustand wiring | `createQueryClient()` with §3.3's numbers; `keys.ts` as §3.2; `invalidation.ts` as §4; the §7.1 stores; the §8 boundary test | Its own acceptance criteria — generated client in CI, MSW request count after revoke, the draft does not survive a route change, no server data in Zustand — plus the boundary test as a third check |
 | **#59** component library | Components import neither Query nor Zustand (§7.4); status→pill map total over the contract's status union with a `never` check | Boundary lint on `packages/ui`; `tsc` fails when the enum grows (after #26) |
 | **#60** pending review screen | Draft in `useApprovalDraftStore` (§7.2); approve and deny **not** optimistic (§5.5); pending indicator from `mutation.isPending`; "already decided" state from the request detail | Its AC tests, plus a test asserting no cache write occurs before the approve response resolves |
 | **#61** dashboard | Query reads with `keepPreviousData`; filters/sort in the URL; counts derived, never stored (§2.4) | Its "filters compose" tests read/write `searchParams`; the no-layout-shift test |
@@ -1096,7 +1102,7 @@ not decisions. §4.1's table, §3.2's key factory and §7.1's inventory are the 
 | **#63** access-log timeline | `consentKeys.accessLog(id, window)` with the window in the key (§3.2); applied filters in the URL | Its AC test: the date-range filter issues the right query params |
 | **#64** notice viewer | `staleTime: Infinity` for the pinned notice (§3.3); the pinned body from the artefact's `notice_version` (ADR-0003 §9) | Its AC test with MSW fixtures: the old consent shows the version in force at approval |
 | **#65** test harness | `createQueryClient({ retry: false })` per test; `queryClient.clear()` in teardown; MSW handlers from the contract's examples; coverage on `src/features/**` | The coverage gate, the suite's runtime budget, and a test that fails if the harness shares a cache across specs |
-| **#69** ops shell + search | Input text local; debounced term in the key and the URL (§3.2, §9); nav badge from the pending-count query; the reason-for-access prompt is session state, never persisted (§7.6) | Its AC: the lookup writes an audit event with a reason and the search is reproducible from the URL |
+| **#69** ops shell + search | Input text local; debounced term in the key and the URL (§3.2, §2.2); nav badge from the pending-count query; the reason-for-access prompt is session state, never persisted (§7.6) | Its AC: the lookup writes an audit event with a reason and the search is reproducible from the URL |
 | **#71** approvals queue | `approvalKeys` + `targetKeys(taskType)` union invalidation (§4.2); maker's own tasks not decidable | Its AC: a decision triggers the underlying action and the queue updates (MSW counts) |
 | **#72** DSAR queue | Countdown derived from `dueAt` (§2.4); bulk selection in `useSelectionStore`, cleared on route change and after the bulk call | Its AC: the countdown renders correctly for due/nearly-due/breached with fake timers |
 | **#73** audit viewer | `staleTime: 60 s` + `refetchOnWindowFocus: false` because **reading is audited** (ADR-0003 §13.2); filters in the URL; export as a `useMutation` + blob, never cached (§3.5) | Its AC: the CSV matches the visible filters; a focus event issues no `GET /audit` |
