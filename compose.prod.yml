@@ -1,0 +1,58 @@
+# ConsentHub — production-flavoured override for docker compose.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f compose.prod.yml up --build
+#   # or: make up-prod
+#
+# Replaces the dev servers with production images only; mysql, redis,
+# backend, volumes, credentials and the dependency/healthcheck graph are
+# inherited from docker-compose.yml unchanged:
+#
+#   customer-portal / ops-console : built SPA served by nginx; /api/* is
+#                                   proxied to the BFF (same origin, no
+#                                   localhost in browser code)
+#   bff                         : compiled output (node dist/index.js)
+#   partner-sandbox             : compiled output (node dist/index.js)
+
+services:
+  bff:
+    build:
+      context: .
+      dockerfile: docker/node-prod.Dockerfile
+    command: ["node", "apps/bff/dist/index.js"]
+
+  partner-sandbox:
+    build:
+      context: .
+      dockerfile: docker/node-prod.Dockerfile
+    command: ["node", "apps/partner-sandbox/dist/index.js"]
+
+  customer-portal:
+    build:
+      context: .
+      dockerfile: docker/frontend-prod.Dockerfile
+      args:
+        APP_DIR: customer-portal
+    ports:
+      - "5173:80"
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
+  ops-console:
+    build:
+      context: .
+      dockerfile: docker/frontend-prod.Dockerfile
+      args:
+        APP_DIR: ops-console
+    ports:
+      - "5174:80"
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s

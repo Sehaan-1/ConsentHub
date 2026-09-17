@@ -13,6 +13,9 @@ public class SecurityConfiguration {
         return http
                 .csrf(AbstractHttpConfigurer::disable)
                 .authorizeHttpRequests(authorize -> authorize
+                        // Liveness/readiness for docker compose healthchecks and load
+                        // balancers; carries no business data.
+                        .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                         .requestMatchers("/api/hello").permitAll()
                         .anyRequest().authenticated())
                 .build();
